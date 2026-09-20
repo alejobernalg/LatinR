@@ -241,3 +241,13 @@ grafico_flujo <- function(n_docs, n_motores, nombres_motores) {
     coord_cartesian(xlim = c(-0.1, 8.9), ylim = c(-0.1, 2.1)) +
     theme_void()
 }
+
+#' Guarda una figura del reporte como PNG en `figuras/` y la devuelve
+#'
+#' Se usa dentro de los bloques del reporte: la figura se dibuja en el
+#' documento y además queda guardada como archivo.
+guardar_figura <- function(p, nombre, ancho = 8, alto = 4.6, dir = "figuras") {
+  dir.create(dir, showWarnings = FALSE)
+  ggsave(file.path(dir, nombre), p, width = ancho, height = alto, dpi = 200, device = ragg::agg_png)
+  p
+}

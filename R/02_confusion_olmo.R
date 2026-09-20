@@ -36,8 +36,9 @@ if (sys.nframe() == 0) {
   print(mc_olmo, n = Inf)
 
   p <- graficar_matriz_confusion(mc_olmo, motor_filtro = "olmo")
+  dir.create("figuras", showWarnings = FALSE)
   ggsave(
-    "Datos/matriz_confusion_olmo.png", p,
+    "figuras/matriz_confusion_olmo.png", p,
     width = 8, height = 6, dpi = 150, device = ragg::agg_png
   )
 }

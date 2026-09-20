@@ -29,8 +29,9 @@ if (sys.nframe() == 0) {
   print(confusiones_frecuentes(errores), n = Inf)
 
   p <- graficar_tipos_error(resumen)
+  dir.create("figuras", showWarnings = FALSE)
   ggsave(
-    "Datos/tipos_error_olmo.png", p,
+    "figuras/tipos_error_olmo.png", p,
     width = 8, height = 6, dpi = 150, device = ragg::agg_png
   )
 }
