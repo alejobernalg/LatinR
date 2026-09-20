@@ -61,3 +61,24 @@ test_that("resumen_estabilidad devuelve NA de asimetría con menos de 3 document
 
   expect_true(is.na(res$asimetria))
 })
+
+test_that("segmentar_parrafos une las líneas que empiezan en minúscula a la anterior", {
+  lineas <- c('"Carta uno empieza', '"sigue la frase', 'Otra carta')
+
+  seg <- segmentar_parrafos(lineas, lineas, unir_continuaciones = TRUE)
+  expect_equal(nrow(seg), 2)
+  expect_equal(seg$referencia[1], '"Carta uno empieza "sigue la frase')
+
+  # por defecto cada línea es un documento
+  expect_equal(nrow(segmentar_parrafos(lineas, lineas)), 3)
+})
+
+test_that("leer_lineas_csv quita las comillas que envuelven la línea y deshace las duplicadas", {
+  ruta <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c('"Dijo ""hola"", y se fue."', 'Sin comillas, tal cual', '"Otra línea"'), ruta)
+
+  expect_equal(
+    leer_lineas_csv(ruta),
+    c('Dijo "hola", y se fue.', "Sin comillas, tal cual", "Otra línea")
+  )
+})

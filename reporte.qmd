@@ -1,0 +1,401 @@
+---
+title: "Análisis lingüístico de los errores del motor OlmOCR"
+subtitle: "Tipos de error, preservación de entidades y estabilidad entre documentos"
+lang: es
+format:
+  html:
+    css: estilo.css
+    include-after-body: figuras.html
+    toc: true
+    toc-title: "Contenido"
+    number-sections: true
+    embed-resources: true
+    fig-width: 8
+    fig-height: 4.6
+crossref:
+  title-delim: "."
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(knitr)
+
+if (Sys.getlocale("LC_CTYPE") %in% c("C", "POSIX")) {
+  tryCatch(
+    Sys.setlocale("LC_CTYPE", "es_ES.UTF-8"),
+    warning = function(w) Sys.setlocale("LC_CTYPE", "en_US.UTF-8")
+  )
+}
+opts_chunk$set(dev = "ragg_png", dpi = 200)
+
+source("R/01_alineamiento.R")
+source("R/05_estabilidad.R")
+source("R/03_entidades.R")
+source("R/07_metricas_olmo.R")
+source("R/08_tipos_error.R")
+source("R/10_configuracion.R")
+source("R/11_figuras_reporte.R")
+
+# Otra configuración: LATINR_CONFIG=mi_config.yml quarto render reporte.qmd
+cfg <- leer_configuracion()
+corpus <- cargar_corpus(cfg)
+motores <- unique(corpus$motor)
+etiquetas <- set_names(
+  map_chr(cfg$motores, ~ .x$etiqueta %||% .x$nombre),
+  map_chr(cfg$motores, "nombre")
+)
+m1 <- motores[1]
+lab <- etiquetas[[m1]]
+n_docs <- n_distinct(corpus$doc_id)
+n_motores <- length(motores)
+
+# Formato: coma decimal, punto de miles y espacio duro antes de "%"
+num <- function(x, d = 1) gsub("\\.", ",", formatC(x, format = "f", digits = d))
+pct <- function(x, d = 1) paste0(num(100 * x, d), "\u202f%")
+miles <- function(x) format(x, big.mark = ".", decimal.mark = ",", trim = TRUE)
+plural_op <- c("Sustitución" = "sustituciones", "Omisión" = "omisiones", "Inserción" = "inserciones")
+
+# --- CER y WER por documento ---------------------------------------------
+por_doc <- function(f) {
+  corpus %>%
+    mutate(m = map2(referencia, hipotesis, f)) %>%
+    select(motor, doc_id, m) %>%
+    unnest(m)
+}
+cer_doc <- por_doc(errores_caracter)
+wer_doc <- por_doc(errores_palabra)
+
+doc_long <- bind_rows(
+  cer_doc %>% transmute(motor, doc_id, metrica = "CER", valor = cer),
+  wer_doc %>% transmute(motor, doc_id, metrica = "WER", valor = wer)
+)
+disp <- resumen_dispersion(doc_long)
+d1 <- function(met, col) disp %>% filter(motor == m1, metrica == met) %>% pull({{ col }})
+
+# Validación de las operaciones de edición contra stringdist
+ops_por_doc <- cer_doc$sustituciones + cer_doc$eliminaciones + cer_doc$inserciones
+lv <- stringdist::stringdist(corpus$referencia, corpus$hipotesis, method = "lv")
+n_discrepancias <- sum(ops_por_doc != lv)
+n_salidas <- nrow(corpus)
+
+# --- Errores de carácter ---------------------------------------------------
+errores <- errores_por_tipo(corpus)
+n_ref_car <- cer_doc %>% group_by(motor) %>% summarise(n_ref = sum(n_ref), .groups = "drop")
+comp <- errores %>% count(motor, operacion) %>% mutate(operacion = str_to_sentence(operacion))
+comp1 <- comp %>% filter(motor == m1)
+total_ops <- sum(comp1$n)
+op_dom <- comp1$operacion[which.max(comp1$n)]
+p_op <- function(op) sum(comp1$n[comp1$operacion == op]) / total_ops
+cer_global <- total_ops / n_ref_car$n_ref[n_ref_car$motor == m1]
+
+top <- top_sustituciones(errores, 8)
+top1 <- top %>% filter(motor == m1)
+subs1 <- errores %>%
+  filter(motor == m1, operacion == "sustitución") %>%
+  mutate(grupo = grupo_sustitucion(ref_char, hip_char), tipo = tipo_sustitucion(ref_char, hip_char))
+p_grupo <- function(g) mean(subs1$grupo == g)
+n_tipo <- function(t) sum(subs1$tipo == t)
+
+# --- Preservación de entidades --------------------------------------------
+det <- detalle_entidades(corpus)
+pres <- preservacion_entidades(corpus)
+pres1 <- pres %>% filter(motor == m1)
+tasa_cat <- function(cat) pres1$tasa_preservacion[pres1$categoria == cat]
+n_cat <- function(cat) pres1$tokens_totales[pres1$categoria == cat]
+num_det <- det %>% filter(motor == m1, categoria == "numero")
+es_ordinal <- str_detect(num_det$entidad, "[ºª°]$")
+cat_chica <- pres1 %>% slice_min(tokens_totales, n = 1, with_ties = FALSE)
+
+frase_wer <- if (d1("WER", mediana) > d1("CER", mediana)) "; el WER mediano supera al CER mediano, como es esperable: un solo carácter erróneo invalida la palabra completa" else ""
+
+# --- Estabilidad -----------------------------------------------------------
+peor <- doc_long %>% filter(motor == m1, metrica == "CER") %>% slice_max(valor, n = 1, with_ties = FALSE)
+razon_max <- d1("CER", maximo) / d1("CER", mediana)
+```
+
+# Introducción
+
+La comparación cuantitativa habitual entre motores OCR resume el desempeño en la tasa de error de
+caracteres (CER), la tasa de error de palabras (WER) y el tiempo por página. Estas métricas son útiles para
+escoger un motor, pero promedian todos los errores por igual: dos motores con un CER similar pueden
+equivocarse de maneras muy distintas y conservar información muy distinta. Para tareas administrativas
+concretas, como recuperar nombres en un padrón, ubicar fechas en una resolución o localizar
+identificadores en un formulario, el promedio es insuficiente.
+
+Este reporte propone un análisis complementario sobre documentos administrativos colombianos. En lugar de
+reducir el motor a unos pocos números, caracteriza su comportamiento erróneo desde tres dimensiones: los
+tipos de error a nivel de carácter, la preservación de entidades administrativas y la estabilidad del error
+entre documentos. La pregunta cambia de qué motor tiene menor error promedio a qué información preserva el
+motor y con cuánta regularidad. Aquí se analiza `r txt <- if (n_motores == 1) "1 motor" else paste(n_motores, "motores"); txt`
+(**`r paste(unname(etiquetas), collapse = ", ")`**) sobre `r n_docs` documentos; CER y WER se incluyen solo
+como contexto. El diseño admite varios motores: se agregan en `config.yml`.
+
+# Datos y métodos
+
+## Corpus y motores
+
+El corpus consta de `r n_docs` documentos administrativos colombianos. Para cada documento se dispone de la
+transcripción manual de referencia y de la salida de `r lab`. El motor se ejecutó previamente: este reporte
+no ejecuta OCR, recibe las salidas en texto plano alineadas con la referencia, documento por documento, y
+se concentra en el análisis posterior, implementado en R.
+
+Cada línea de los archivos de entrada es un documento, de modo que `r n_docs` documentos × `r n_motores`
+`r if (n_motores == 1) "motor" else "motores"` = `r n_docs * n_motores` observaciones.
+
+```{r}
+#| label: fig-flujo
+#| fig-cap: !expr 'paste0("Flujo del análisis lingüístico. Los ", n_docs, " documentos se procesan con ", if (n_motores == 1) "1 motor OCR" else paste(n_motores, "motores OCR"), ", lo que produce ", n_docs * n_motores, " comparaciones entre la transcripción de referencia y la salida OCR; cada comparación alimenta los tres análisis: errores de carácter, preservación de entidades y estabilidad entre documentos.")'
+#| fig-height: 1.9
+grafico_flujo(n_docs, n_motores, unname(etiquetas))
+```
+
+## Normalización y métricas auxiliares
+
+El CER es la distancia de Levenshtein a nivel de carácter entre la referencia y la salida del motor,
+dividida por la longitud de la referencia; el WER se define igual a nivel de palabra, donde una palabra es
+una secuencia de letras o dígitos, sin puntuación. La normalización es mínima: se quitan las comillas que
+envuelven cada línea del CSV y se deshace la duplicación de las comillas internas. No se corrige la
+ortografía, no se eliminan las tildes, se distingue entre mayúsculas y minúsculas en el cálculo del CER y la
+puntuación se conserva.
+
+Para clasificar los errores de carácter se recuperan las operaciones de edición (sustitución, omisión e
+inserción) con `adist()`. La distancia total obtenida a partir de esas operaciones se validó contra
+`stringdist`: sobre las `r n_salidas` salidas disponibles hubo `r n_discrepancias` discrepancias.
+
+## Análisis lingüístico en R
+
+El análisis se organiza en tres componentes:
+
+1. **Errores de carácter.** Composición del error en sustituciones, omisiones e inserciones, y matriz de
+   confusiones entre el carácter de referencia y el carácter OCR. Para su lectura, cada sustitución se
+   agrupa según los caracteres implicados: confusión entre letras, tildes y diacríticos, letra por dígito,
+   comillas y apóstrofos, puntuación u otras; esta agrupación no altera los conteos.
+2. **Preservación de entidades administrativas.** Fechas, números, nombres propios y códigos
+   administrativos se extraen de la referencia con expresiones regulares y un diccionario léxico revisado
+   manualmente (con `quanteda`), y se buscan en la salida del mismo documento. La comparación no distingue
+   mayúsculas, no elimina tildes, no corrige el texto OCR y no equipara caracteres visualmente parecidos;
+   solo se ignora el punto ordinal de las fechas («23.» frente a «23»). La tasa de preservación es la
+   proporción de entidades de la referencia presentes en la salida.
+3. **Estabilidad entre documentos.** Distribución del CER y del WER entre los documentos de cada motor,
+   resumida con la mediana, el rango intercuartílico (IQR), el percentil 90 (P90) y el máximo, sin excluir
+   valores extremos ni truncar las tasas en 1.
+
+`stringdist` aporta el alineamiento subyacente de la distancia de Levenshtein, `tidyverse` organiza las
+estructuras de datos, `ggplot2` produce las visualizaciones y Quarto compila el reporte.
+
+# Resultados
+
+## CER y WER como contexto cuantitativo
+
+Estas métricas permiten situar el desempeño global del motor, pero no explican la naturaleza del error.
+
+```{r}
+#| label: fig-cer-wer
+#| fig-cap: !expr 'paste0("CER y WER por motor. El punto marca la mediana entre los ", n_docs, " documentos y la línea, el rango intercuartílico (percentiles 25 a 75). Un valor menor indica menor error. Cada panel tiene su propia escala horizontal.")'
+#| fig-height: 2.3
+grafico_cer_wer(disp, etiquetas)
+```
+
+La mediana del CER de `r lab` es `r pct(d1("CER", mediana))` y la del WER, `r pct(d1("WER", mediana))``r frase_wer`.
+Sumando todos los documentos, el CER global es `r pct(cer_global, 2)`. Los siguientes tres análisis
+constituyen el núcleo del estudio.
+
+## Errores a nivel de carácter
+
+```{r}
+#| label: fig-composicion
+#| fig-cap: "Composición de los errores de carácter por motor. Cada barra suma el 100 % de las operaciones de edición y se reparte entre sustituciones, omisiones e inserciones; el número a la derecha es el total de operaciones. La figura compara la composición, no el volumen de errores."
+#| fig-height: 2
+grafico_composicion(comp, etiquetas)
+```
+
+En `r lab` predominan las `r plural_op[[op_dom]]`: son el `r pct(p_op(op_dom))` de sus operaciones de
+edición (`r pct(p_op("Sustitución"))` sustituciones, `r pct(p_op("Omisión"))` omisiones y
+`r pct(p_op("Inserción"))` inserciones). El total es de `r miles(total_ops)` operaciones sobre
+`r miles(n_ref_car$n_ref[n_ref_car$motor == m1])` caracteres de referencia, como muestra la tabla.
+
+```{r}
+#| label: tabla-ops
+comp %>%
+  pivot_wider(names_from = operacion, values_from = n, values_fill = 0) %>%
+  mutate(Motor = etiquetas[motor], Total = Sustitución + Omisión + Inserción) %>%
+  select(Motor, Sustituciones = Sustitución, Omisiones = Omisión, Inserciones = Inserción, Total) %>%
+  mutate(across(-Motor, miles)) %>%
+  kable(format = "markdown", caption = "Operaciones de edición por motor y tipo de error.", align = "lrrrr")
+```
+
+```{r}
+#| label: fig-sustituciones
+#| fig-cap: "Principales sustituciones de carácter por motor. Cada panel muestra las ocho sustituciones más frecuentes; la barra indica cuántas veces el carácter de la referencia fue reemplazado por el carácter OCR indicado y el color, el tipo de sustitución."
+#| fig-height: 3.6
+grafico_sustituciones(top, etiquetas)
+```
+
+La sustitución más frecuente de `r lab` es `r top1$referencia[1]` → `r top1$ocr[1]` (`r top1$n[1]`). Tres
+patrones lingüísticos se distinguen. Primero, las sustituciones que confunden una letra con un dígito
+(por ejemplo, l por 1 u o por 0) representan el `r pct(p_grupo("Letra por dígito"))` de las sustituciones;
+este tipo de confusión compromete números y códigos. Segundo, las sustituciones asociadas a tildes y
+diacríticos representan el `r pct(p_grupo("Tildes y diacríticos"))`: el motor añade una tilde que la
+referencia no tiene en `r n_tipo("acento añadido")` casos, la pierde en `r n_tipo("acento perdido")` y la
+cambia por otra en `r n_tipo("acento cambiado")`. Tercero, las que solo cambian el tipo de comilla o
+apóstrofo representan el `r pct(p_grupo("Comillas y apóstrofos"))`; son variantes tipográficas que no
+alteran la palabra transcrita.
+
+## Preservación de entidades administrativas
+
+```{r}
+#| label: fig-preservacion
+#| fig-cap: "Preservación de entidades administrativas por motor y categoría. El color y el porcentaje indican la proporción de entidades de la referencia presentes en la salida del motor; debajo se muestra el número de entidades preservadas sobre el número evaluado en la categoría. Un valor mayor indica mejor preservación."
+#| fig-height: 2.5
+grafico_preservacion(pres, etiquetas)
+```
+
+- **Fechas** (n = `r n_cat("fecha")`): `r pct(tasa_cat("fecha"))`.
+- **Números** (n = `r n_cat("numero")`): `r pct(tasa_cat("numero"))`.
+- **Nombres propios** (n = `r n_cat("nombre_propio")`): `r pct(tasa_cat("nombre_propio"))`.
+- **Códigos administrativos** (n = `r n_cat("codigo_administrativo")`): `r pct(tasa_cat("codigo_administrativo"))`.
+
+La categoría con menos entidades (`r tolower(categorias_entidad[[cat_chica$categoria]])`, n = `r cat_chica$tokens_totales`)
+es sensible a un solo acierto o error: una entidad equivale a `r num(100 / cat_chica$tokens_totales)` pp.
+`r if (sum(es_ordinal) > 0) paste0("Entre los números, ", sum(es_ordinal), " de ", length(es_ordinal), " son ordinales (como 2ª) y solo ", sum(num_det$preservado[es_ordinal]), " se preserva, porque la salida los escribe con otro signo (2°); sin los ordinales, la tasa de números sería ", pct(mean(num_det$preservado[!es_ordinal])), ".") else ""`
+
+## Estabilidad entre documentos
+
+¿Es el desempeño del motor consistente entre documentos?
+
+```{r}
+#| label: tabla-estabilidad
+disp %>%
+  mutate(Motor = etiquetas[motor]) %>%
+  select(Motor, metrica, mediana, iqr, p90, maximo) %>%
+  pivot_wider(names_from = metrica, values_from = c(mediana, iqr, p90, maximo), names_glue = "{metrica} {.value}") %>%
+  select(Motor, starts_with("CER"), starts_with("WER")) %>%
+  rename_with(~ str_replace_all(.x, c("mediana" = "mediana", "iqr" = "IQR", "p90" = "P90", "maximo" = "máx.")), -Motor) %>%
+  mutate(across(-Motor, pct)) %>%
+  kable(format = "markdown", caption = "Distribución del CER y del WER entre documentos (IQR: rango intercuartílico; P90: percentil 90; máx.: valor máximo).", align = "lrrrrrrrr")
+```
+
+```{r}
+#| label: fig-dispersion
+#| fig-cap: !expr 'paste0("Distribución del CER y del WER entre documentos por motor. Cada punto es un documento (", n_docs, " por motor); la caja marca la mediana y el rango intercuartílico. No se excluyeron valores extremos y se rotula el documento con mayor error en cada métrica. Cada panel tiene su propia escala vertical.")'
+#| fig-height: 4.4
+grafico_dispersion(doc_long, etiquetas)
+```
+
+La dispersión del error entre documentos es tan relevante como su nivel. El IQR del CER de `r lab` es
+`r pct(d1("CER", iqr))` y su máximo por documento, `r pct(d1("CER", maximo))`
+(`r num(razon_max, 1)` veces la mediana)`r if (razon_max >= 5) ": un motor con buen desempeño típico puede fallar de forma grave en un documento concreto" else ""`.
+El documento con mayor CER es Doc_`r peor$doc_id` (`r pct(peor$valor)`).
+
+# Alcances y límites
+
+- El estudio se basa en `r n_docs` documentos de una sola fuente y en una referencia transcrita
+  manualmente, por lo que los resultados describen este conjunto y no deben extrapolarse sin validación a
+  otros tipos de documento.
+- `r if (n_motores == 1) paste0("Solo se analiza un motor: la estabilidad y la preservación describen a ", lab, " y no hay otro motor contra el cual compararlo.") else paste0("Se comparan ", paste(unname(etiquetas), collapse = ", "), " sobre la misma entrada.")`
+- Las categorías de entidades tienen tamaños muy desiguales (`r paste0(tolower(categorias_entidad[pres1$categoria]), ": ", pres1$tokens_totales, collapse = ", ")`),
+  de modo que las tasas de las categorías pequeñas son poco precisas.
+- La comparación de entidades es exacta, sin tolerancia a variantes, lo que penaliza incluso diferencias
+  menores de forma (una tilde añadida, un «°» por un «ª»).
+- La clasificación de nombres propios usa reglas y un diccionario de exclusión hecho a mano para este
+  corpus; puede quedar ruido en esa categoría. Las mayúsculas arbitrarias del manuscrito (*Si*, *Un*, *Sea*)
+  se descartan si la misma palabra aparece en minúscula en la referencia.
+- Las palabras cortadas por guion de fin de línea (*pre- sente*) se comparan tal como están en la
+  referencia; una salida que las une cuenta como error.
+
+# Conclusiones
+
+Las cifras de CER y WER de `r lab` (`r pct(d1("CER", mediana))` y `r pct(d1("WER", mediana))` de mediana)
+no dicen por sí solas qué información se conserva. Su perfil de error de carácter está dominado por las
+`r plural_op[[op_dom]]` (`r pct(p_op(op_dom))`), y la conservación de entidades depende de la categoría:
+`r pct(tasa_cat("nombre_propio"))` en nombres propios, `r pct(tasa_cat("fecha"))` en fechas y
+`r pct(tasa_cat("codigo_administrativo"))` en códigos administrativos. La estabilidad entre documentos
+también importa: el CER máximo por documento (`r pct(d1("CER", maximo))`) equivale a
+`r num(razon_max, 1)` veces la mediana.
+
+Con un solo motor, estos resultados describen su comportamiento pero no permiten declarar un motor mejor
+que otro. El siguiente paso es agregar las salidas de otros motores en `config.yml` y compilar de nuevo.
+
+# Apéndice {.unnumbered}
+
+## A. CER y WER completos {.unnumbered}
+
+```{r}
+#| label: tabla-cer-wer
+disp %>%
+  select(motor, metrica, documentos, media, mediana) %>%
+  pivot_wider(names_from = metrica, values_from = c(media, mediana), names_glue = "{metrica} {.value}") %>%
+  transmute(
+    Motor = etiquetas[motor], Documentos = documentos,
+    `CER medio` = pct(`CER media`), `CER mediano` = pct(`CER mediana`),
+    `WER medio` = pct(`WER media`), `WER mediano` = pct(`WER mediana`)
+  ) %>%
+  kable(format = "markdown", caption = "CER y WER por motor.", align = "lrrrrr")
+```
+
+## B. Errores por operación y tipo {.unnumbered}
+
+```{r}
+#| label: tabla-tipos
+resumen_tipos_error(errores, n_ref_car) %>%
+  transmute(
+    Motor = etiquetas[motor], Operación = operacion, Tipo = tipo, n = miles(n),
+    `% de errores` = pct(pct_errores), `Por 100 car.` = num(tasa_por_100_car, 2)
+  ) %>%
+  kable(format = "markdown", caption = "Errores de carácter por operación y tipo. La última columna son errores por cada 100 caracteres de la referencia.", align = "lllrrr")
+```
+
+## C. Principales sustituciones por motor {.unnumbered}
+
+Cinco sustituciones más frecuentes dentro de cada motor.
+
+```{r}
+#| label: tabs-sustituciones
+#| results: asis
+cat("::: {.panel-tabset}\n\n")
+for (m in motores) {
+  cat("### ", etiquetas[[m]], "\n\n", sep = "")
+  errores %>%
+    filter(motor == m, operacion == "sustitución") %>%
+    mutate(Referencia = nombre_caracter(ref_char), OCR = nombre_caracter(hip_char)) %>%
+    count(Referencia, OCR, name = "Frecuencia") %>%
+    slice_max(Frecuencia, n = 5, with_ties = FALSE) %>%
+    kable(format = "markdown", align = "llr") %>%
+    cat(sep = "\n")
+  cat("\n\n")
+}
+cat(":::\n")
+```
+
+## D. Preservación de entidades por categoría {.unnumbered}
+
+```{r}
+#| label: tabs-entidades
+#| results: asis
+cat("::: {.panel-tabset}\n\n")
+for (cat_id in names(categorias_entidad)) {
+  cat("### ", categorias_entidad[[cat_id]], "\n\n", sep = "")
+  pres %>%
+    filter(categoria == cat_id) %>%
+    transmute(
+      Motor = etiquetas[motor], `Entidades de referencia` = tokens_totales,
+      Preservadas = tokens_preservados, Tasa = pct(tasa_preservacion, 0)
+    ) %>%
+    kable(format = "markdown", align = "lrrr") %>%
+    cat(sep = "\n")
+  cat("\n\n")
+}
+cat(":::\n")
+```
+
+## E. Reproducibilidad {.unnumbered}
+
+El reporte se genera con `quarto render reporte.qmd`. Las rutas y los motores se definen en `config.yml`
+(para otra configuración: `LATINR_CONFIG=mi_config.yml quarto render reporte.qmd`). El reporte lee las
+salidas ya producidas y no ejecuta ningún motor OCR. Las pruebas de las funciones de análisis se ejecutan
+con `testthat` desde `tests/testthat/`.

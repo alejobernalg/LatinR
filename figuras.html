@@ -1,0 +1,14 @@
+<script>
+/* Pone en negrita la etiqueta "Figura N." al inicio de cada leyenda de figura */
+document.addEventListener("DOMContentLoaded", function () {
+  document.querySelectorAll("figcaption.quarto-float-fig").forEach(function (el) {
+    var m = el.textContent.match(/^\s*(Figura\s+\d+\.)([\s\S]*)$/);
+    if (!m) return;
+    var fuerte = document.createElement("strong");
+    fuerte.textContent = m[1];
+    el.textContent = "";
+    el.appendChild(fuerte);
+    el.appendChild(document.createTextNode(m[2]));
+  });
+});
+</script>

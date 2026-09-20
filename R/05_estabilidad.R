@@ -25,6 +25,56 @@ cer_documento <- function(ref, hip) {
   errores / n_ref
 }
 
+#' Lee un archivo de texto con un documento por línea
+#'
+#' Los archivos de Datos/ son CSV de una columna: cada línea va entre comillas
+#' y las comillas internas se duplican (`""`). Esta función quita las comillas
+#' que envuelven la línea y deshace la duplicación, de modo que el texto
+#' comparado sea el del documento y no el del formato de archivo. Si la línea
+#' no viene entre comillas, se deja tal cual.
+#'
+#' @param ruta Ruta del archivo.
+#' @return Vector de caracteres, un elemento por línea.
+leer_lineas_csv <- function(ruta) {
+  lineas <- readr::read_lines(ruta)
+  envuelta <- stringr::str_detect(lineas, '^".*"$')
+  lineas[envuelta] <- lineas[envuelta] %>%
+    stringr::str_sub(2, -2) %>%
+    stringr::str_replace_all('""', '"')
+  lineas
+}
+
+#' Agrupa las líneas de referencia e hipótesis en documentos (párrafos)
+#'
+#' Los archivos traen una línea por bloque de página. Una línea que empieza en
+#' minúscula (tras una comilla opcional) continúa la frase de la anterior, es
+#' decir, la carta cruza páginas; con `unir_continuaciones = TRUE` se une a
+#' ella y cada fila es una carta completa. Por defecto (FALSE) cada línea es
+#' un documento. La regla se aplica a la referencia y se usa la misma agrupación
+#' en la hipótesis, porque ambas tienen el mismo número de líneas.
+#'
+#' @param ref,hip Vectores de líneas de igual largo.
+#' @return Tibble con `doc_id`, `motor`, `referencia`, `hipotesis`.
+segmentar_parrafos <- function(ref, hip, motor = "olmo", unir_continuaciones = FALSE) {
+  stopifnot(length(ref) == length(hip))
+
+  inicio <- if (unir_continuaciones) {
+    stringr::str_detect(ref, '^"?[[:upper:]]')
+  } else {
+    rep(TRUE, length(ref))
+  }
+  inicio[1] <- TRUE
+
+  tibble(grupo = cumsum(inicio), ref = ref, hip = hip) %>%
+    group_by(grupo) %>%
+    summarise(
+      referencia = paste(ref, collapse = " "),
+      hipotesis = paste(hip, collapse = " "),
+      .groups = "drop"
+    ) %>%
+    transmute(doc_id = as.character(grupo), motor = motor, referencia, hipotesis)
+}
+
 #' Calcula la tasa de error de caracteres de cada documento de un corpus
 #'
 #' @param df Data frame con al menos las columnas `motor`, `doc_id`,

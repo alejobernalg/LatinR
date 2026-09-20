@@ -1,0 +1,19 @@
+# Configuración del reporte (reporte.qmd).
+# Para analizar otro conjunto de salidas: copiar este archivo, cambiar las
+# rutas y compilar con  LATINR_CONFIG=mi_config.yml quarto render reporte.qmd
+titulo: "Análisis lingüístico de errores en motores OCR"
+
+# Transcripción manual de referencia: un documento por línea (CSV de una
+# columna: la línea va entre comillas y las comillas internas se duplican).
+referencia: Datos/groundtruth.csv
+
+# Un motor por entrada: nombre, etiqueta que se muestra en el reporte y archivo
+# con su salida (mismas líneas que la referencia). Agregar más entradas para comparar varios motores.
+motores:
+  - nombre: olmo
+    etiqueta: OlmOCR
+    salida: Datos/salida_olmo.csv
+
+# FALSE: cada línea del archivo es un documento.
+# TRUE: las líneas que empiezan en minúscula se unen a la anterior.
+unir_continuaciones: false

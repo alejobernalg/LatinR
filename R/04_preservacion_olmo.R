@@ -11,7 +11,8 @@ source("R/03_entidades.R")
 source("R/02_confusion_olmo.R")
 
 if (sys.nframe() == 0) {
-  df_olmo <- cargar_datos_olmo()
+  # Cada línea de Datos/ es un documento
+  df_olmo <- cargar_parrafos_olmo()
   tabla_olmo <- preservacion_entidades(df_olmo)
 
   print(tabla_olmo, n = Inf)

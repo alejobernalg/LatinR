@@ -1,0 +1,125 @@
+/* Estilo del reporte: texto serif, títulos y captions sans, tablas con
+   reglas finas y filas alternas, figuras con leyenda "Figura N." en negrita. */
+
+:root {
+  --sans: -apple-system, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --serif: "Charter", "Bitstream Charter", "Source Serif Pro", Georgia, "Times New Roman", serif;
+  --gris: #6b6f76;
+  --azul: #1f4e79;
+}
+
+body {
+  font-family: var(--serif);
+  font-size: 1.06rem;
+  line-height: 1.55;
+  color: #1c1c1c;
+}
+
+main.content, #quarto-content main { max-width: 52rem; }
+
+/* Título */
+.quarto-title-block .title, h1.title {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 2.35rem;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.4rem;
+}
+.quarto-title-block .subtitle, .subtitle {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 1.2rem;
+  color: var(--gris);
+}
+
+/* Encabezados */
+h1, h2, h3, h4 { font-family: var(--sans); color: #1c1c1c; }
+h2 {
+  font-weight: 600;
+  font-size: 1.7rem;
+  border-bottom: none;
+  margin-top: 2.6rem;
+  margin-bottom: 1rem;
+}
+h3 {
+  font-weight: 600;
+  font-size: 1.22rem;
+  margin-top: 2rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #dcdfe3;
+}
+h2 .header-section-number, h3 .header-section-number { margin-right: 0.35em; }
+
+/* Texto */
+p { text-align: justify; hyphens: auto; -webkit-hyphens: auto; margin-bottom: 1.05rem; }
+li { text-align: justify; hyphens: auto; }
+code { font-size: 0.84em; color: #6f42c1; background: transparent; padding: 0; }
+
+/* Figuras */
+figure, .quarto-figure { margin: 1.6rem 0; }
+figure img, .quarto-figure img { max-width: 100%; height: auto; }
+figcaption, .figure-caption {
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: #3a3d42;
+  text-align: left;
+  margin-top: 0.7rem;
+}
+figcaption .quarto-float-caption-label, .figure-caption .quarto-float-caption-label,
+figcaption > span:first-child { font-weight: 700; }
+
+/* Diagrama de flujo (Figura 1) */
+.flujo { display: flex; align-items: stretch; gap: 0.6rem; margin: 1.4rem 0 0.4rem; }
+.flujo .caja {
+  flex: 1; border: 1px solid #b9bdc3; background: #f7f8f9; padding: 0.9rem 0.5rem;
+  text-align: center; font-family: var(--sans); display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+}
+.flujo .caja .cifra { font-size: 2.3rem; font-weight: 800; line-height: 1; color: #222; }
+.flujo .caja .texto { font-size: 0.82rem; color: #444; margin-top: 0.45rem; line-height: 1.25; }
+.flujo .flecha { align-self: center; color: #777; font-size: 1.1rem; }
+
+/* Tablas */
+table {
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2rem 0 1.6rem;
+  border-top: 1px solid #d6d9dd;
+  border-bottom: 1.5px solid #222;
+}
+table caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--gris);
+  font-size: 0.86rem;
+  padding: 0 0 0.5rem;
+}
+table thead th {
+  font-weight: 700;
+  border-bottom: 1.5px solid #222;
+  padding: 0.55rem 0.7rem;
+  vertical-align: bottom;
+  color: #1c1c1c;
+}
+table td { padding: 0.5rem 0.7rem; border: none; }
+table tbody tr:nth-child(odd) td { background: #f2f2f2; }
+table tbody tr:nth-child(even) td { background: #ffffff; }
+table tbody tr td, table thead tr th { border-left: none; border-right: none; }
+
+/* Pestañas */
+.nav-tabs .nav-link { font-family: var(--serif); font-size: 1rem; }
+.nav-tabs .nav-link.active { color: #222; }
+.tab-content { border: 1px solid #dee2e6; border-top: none; padding: 0.4rem 1rem; }
+.tab-content h3 { display: none; }
+
+/* Índice lateral */
+#TOC, .sidebar nav[role="doc-toc"] { font-family: var(--sans); font-size: 0.85rem; }
+
+@media (max-width: 700px) {
+  .flujo { flex-direction: column; }
+  .flujo .flecha { transform: rotate(90deg); }
+}

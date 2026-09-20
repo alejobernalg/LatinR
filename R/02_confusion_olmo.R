@@ -12,28 +12,25 @@ if (Sys.getlocale("LC_CTYPE") %in% c("C", "POSIX")) {
 }
 
 source("R/01_alineamiento.R")
+source("R/05_estabilidad.R")
 
-#' Carga groundtruth.csv y salida_olmo.csv y arma el data frame de entrada
-#' esperado por matriz_confusion(): una fila por documento, con `motor`,
-#' `referencia` (transcripción manual) e `hipotesis` (salida de olmOCR).
+#' Carga los datos de olmOCR segmentados por párrafo (una fila por documento)
 #'
-#' Ambos archivos en Datos/ son texto plano (un documento completo por
-#' archivo, sin encabezado ni columnas), así que se leen con
-#' readr::read_file() en vez de read_csv().
-cargar_datos_olmo <- function(dir_datos = "Datos") {
-  referencia <- readr::read_file(file.path(dir_datos, "groundtruth.csv"))
-  hipotesis <- readr::read_file(file.path(dir_datos, "salida_olmo.csv"))
-
-  tibble(
-    doc_id = "1",
+#' Lee las líneas de ambos archivos y las agrupa con `segmentar_parrafos()`
+#' (R/05_estabilidad.R, que este archivo carga).
+#'
+#' @return Tibble con `doc_id`, `motor`, `referencia`, `hipotesis`.
+cargar_parrafos_olmo <- function(dir_datos = "Datos", unir_continuaciones = FALSE) {
+  segmentar_parrafos(
+    leer_lineas_csv(file.path(dir_datos, "groundtruth.csv")),
+    leer_lineas_csv(file.path(dir_datos, "salida_olmo.csv")),
     motor = "olmo",
-    referencia = referencia,
-    hipotesis = hipotesis
+    unir_continuaciones = unir_continuaciones
   )
 }
 
 if (sys.nframe() == 0) {
-  df_olmo <- cargar_datos_olmo()
+  df_olmo <- cargar_parrafos_olmo()
   mc_olmo <- matriz_confusion(df_olmo)
 
   print(mc_olmo, n = Inf)
