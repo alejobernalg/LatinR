@@ -1,6 +1,13 @@
 ---
 title: "Análisis lingüístico de los errores de ICR: motor OlmOCR"
 subtitle: "Tipos de error, preservación de entidades y estabilidad entre documentos"
+author:
+  - name: "Alejandro Bernal"
+    affiliations:
+      - name: "Universidad Externado de Colombia"
+  - name: "Angie Donato"
+    affiliations:
+      - name: "Universidad Externado de Colombia"
 lang: es
 format:
   html:
@@ -10,8 +17,27 @@ format:
     toc-title: "Contenido"
     number-sections: true
     embed-resources: true
+    html-math-method: mathml
+    fig-align: center
     fig-width: 8
     fig-height: 4.6
+  typst:
+    papersize: a4
+    margin:
+      x: 2.6cm
+      top: 2.7cm
+      bottom: 2.6cm
+    mainfont: "New Computer Modern"
+    fontsize: 10.5pt
+    template-partials:
+      - typst/typst-template.typ
+    include-in-header: estilo-cabecera.typ
+    include-before-body: estilo-cuerpo.typ
+    fig-format: png
+    fig-dpi: 200
+    fig-width: 8
+    fig-height: 4.6
+    number-sections: true
 crossref:
   title-delim: "."
 execute:
@@ -59,6 +85,11 @@ n_motores <- length(motores)
 num <- function(x, d = 1) gsub("\\.", ",", formatC(x, format = "f", digits = d))
 pct <- function(x, d = 1) paste0(num(100 * x, d), "\u202f%")
 miles <- function(x) format(x, big.mark = ".", decimal.mark = ",", trim = TRUE)
+# Pestañas en HTML; en PDF (Typst) los subtítulos van en cursiva y sin contenedor
+es_typst <- knitr::pandoc_to("typst")
+tabset_abrir <- function() if (!es_typst) cat("::: {.panel-tabset}\n\n")
+tabset_titulo <- function(x) if (es_typst) cat("*", x, "*\n\n", sep = "") else cat("### ", x, "\n\n", sep = "")
+tabset_cerrar <- function() if (!es_typst) cat(":::\n")
 plural_op <- c("Sustitución" = "sustituciones", "Omisión" = "omisiones", "Inserción" = "inserciones")
 
 # --- CER y WER por documento ---------------------------------------------
@@ -163,6 +194,34 @@ if (hay_contraste) {
 }
 ```
 
+```{r}
+#| label: resumen
+#| results: asis
+contraste_txt <- if (hay_contraste) paste0(
+  "Un contraste descriptivo con el desempeño del mismo motor en folios impresos muestra un error típico mucho mayor ",
+  "en los manuscritos y un cambio en el perfil de error, de omisiones a ", plural_op[[op_dom]], ". "
+) else ""
+resumen_txt <- paste0(
+  "**Resumen.** Este reporte caracteriza los errores de un motor de reconocimiento inteligente de caracteres (ICR), ",
+  lab, ", sobre ", n_docs, " documentos administrativos colombianos manuscritos, a partir de su comparación con una ",
+  "transcripción manual. En lugar de resumir el desempeño en la tasa de error de caracteres (CER, mediana de ",
+  pct(d1("CER", mediana)), ") y de palabras (WER, ", pct(d1("WER", mediana)), "), se analizan tres dimensiones: ",
+  "los tipos de error de carácter, entre los que predominan las ", plural_op[[op_dom]], " (", pct(p_op(op_dom)),
+  " de las operaciones de edición); la preservación de entidades administrativas, que va de ",
+  pct(min(pres1$tasa_preservacion)), " a ", pct(max(pres1$tasa_preservacion)), " según la categoría; y la ",
+  "estabilidad entre documentos, con un CER máximo de ", pct(d1("CER", maximo)), " (", num(razon_max, 1),
+  " veces la mediana). ", contraste_txt,
+  "El análisis es reproducible con R y Quarto a partir de un archivo de configuración."
+)
+claves_txt <- "**Palabras clave:** ICR, OlmOCR, tasa de error de caracteres, preservación de entidades, estabilidad, documentos administrativos, español."
+
+if (knitr::pandoc_to("typst")) {
+  cat("```{=typst}\n#resumen[\n```\n\n", resumen_txt, "\n\n", claves_txt, "\n\n```{=typst}\n]\n```\n", sep = "")
+} else {
+  cat("::: {.resumen}\n\n", resumen_txt, "\n\n", claves_txt, "\n\n:::\n", sep = "")
+}
+```
+
 # Introducción
 
 La comparación cuantitativa habitual entre motores ICR resume el desempeño en la tasa de error de
@@ -189,7 +248,7 @@ transcripción manual de referencia y de la salida de `r lab`. El motor se ejecu
 no ejecuta ICR, recibe las salidas en texto plano alineadas con la referencia, documento por documento, y
 se concentra en el análisis posterior, implementado en R.
 
-Cada línea de los archivos de entrada es un documento, de modo que `r n_docs` documentos × `r n_motores`
+Cada línea de los archivos de entrada es un documento (@fig-flujo), de modo que `r n_docs` documentos × `r n_motores`
 `r if (n_motores == 1) "motor" else "motores"` = `r n_docs * n_motores` observaciones.
 
 ```{r}
@@ -202,8 +261,15 @@ guardar_figura(grafico_flujo(n_docs, n_motores, unname(etiquetas)), "fig1_flujo.
 ## Normalización y métricas auxiliares
 
 El CER es la distancia de Levenshtein a nivel de carácter entre la referencia y la salida del motor,
-dividida por la longitud de la referencia; el WER se define igual a nivel de palabra, donde una palabra es
-una secuencia de letras o dígitos, sin puntuación. La normalización es mínima: se quitan las comillas que
+dividida por la longitud de la referencia:
+
+$$
+\mathrm{CER} = \frac{S + D + I}{N}
+$$ {#eq-cer}
+
+donde $S$, $D$ e $I$ son las sustituciones, omisiones e inserciones necesarias para transformar la
+referencia en la salida, y $N$ es el número de caracteres de la referencia (@eq-cer). El WER se define igual
+a nivel de palabra, donde una palabra es una secuencia de letras o dígitos, sin puntuación. La normalización es mínima: se quitan las comillas que
 envuelven cada línea del CSV y se deshace la duplicación de las comillas internas. No se corrige la
 ortografía, no se eliminan las tildes, se distingue entre mayúsculas y minúsculas en el cálculo del CER y la
 puntuación se conserva.
@@ -238,7 +304,7 @@ integración tabular a nivel de token (apéndice E), `tidyverse` organiza las es
 
 ## CER y WER como contexto cuantitativo
 
-Estas métricas permiten situar el desempeño global del motor, pero no explican la naturaleza del error.
+Estas métricas permiten situar el desempeño global del motor (@fig-cer-wer), pero no explican la naturaleza del error.
 
 ```{r}
 #| label: fig-cer-wer
@@ -260,19 +326,20 @@ constituyen el núcleo del estudio.
 guardar_figura(grafico_composicion(comp, etiquetas), "fig3_composicion.jpg", 8, 2)
 ```
 
-En `r lab` predominan las `r plural_op[[op_dom]]`: son el `r pct(p_op(op_dom))` de sus operaciones de
+En `r lab` predominan las `r plural_op[[op_dom]]` (@fig-composicion): son el `r pct(p_op(op_dom))` de sus operaciones de
 edición (`r pct(p_op("Sustitución"))` sustituciones, `r pct(p_op("Omisión"))` omisiones y
 `r pct(p_op("Inserción"))` inserciones). El total es de `r miles(total_ops)` operaciones sobre
-`r miles(n_ref_car$n_ref[n_ref_car$motor == m1])` caracteres de referencia, como muestra la tabla.
+`r miles(n_ref_car$n_ref[n_ref_car$motor == m1])` caracteres de referencia, como muestra la @tbl-ops.
 
 ```{r}
-#| label: tabla-ops
+#| label: tbl-ops
+#| tbl-cap: "Operaciones de edición por motor y tipo de error."
 comp %>%
   pivot_wider(names_from = operacion, values_from = n, values_fill = 0) %>%
   mutate(Motor = etiquetas[motor], Total = Sustitución + Omisión + Inserción) %>%
   select(Motor, Sustituciones = Sustitución, Omisiones = Omisión, Inserciones = Inserción, Total) %>%
   mutate(across(-Motor, miles)) %>%
-  kable(format = "markdown", caption = "Operaciones de edición por motor y tipo de error.", align = "lrrrr")
+  kable(format = "markdown", align = "lrrrr")
 ```
 
 ```{r}
@@ -282,7 +349,7 @@ comp %>%
 guardar_figura(grafico_sustituciones(top, etiquetas), "fig4_sustituciones.jpg", 8, 3.6)
 ```
 
-La sustitución más frecuente de `r lab` es `r top1$referencia[1]` → `r top1$ocr[1]` (`r top1$n[1]`). Tres
+Como muestra la @fig-sustituciones, la sustitución más frecuente de `r lab` es `r top1$referencia[1]` → `r top1$ocr[1]` (`r top1$n[1]`). Tres
 patrones lingüísticos se distinguen. Primero, las sustituciones que confunden una letra con un dígito
 (por ejemplo, l por 1 u o por 0) representan el `r pct(p_grupo("Letra por dígito"))` de las sustituciones;
 este tipo de confusión compromete números y códigos. Segundo, las sustituciones asociadas a tildes y
@@ -299,23 +366,24 @@ alteran la palabra transcrita.
 guardar_figura(grafico_matriz_confusion(mc), "fig5_matriz_confusion.jpg", 8, 7.2)
 ```
 
-La matriz completa incluye lo que la lista de sustituciones no muestra. Lo más omitido es
+La matriz de confusión (@fig-matriz) incluye lo que la lista de sustituciones no muestra. Lo más omitido es
 «`r oi_top("omisión")$caracter`» (`r oi_top("omisión")$n` veces) y lo más insertado,
-«`r oi_top("inserción")$caracter`» (`r oi_top("inserción")$n`); la tabla resume los cinco casos más
+«`r oi_top("inserción")$caracter`» (`r oi_top("inserción")$n`); la @tbl-omisiones resume los cinco casos más
 frecuentes de cada tipo.
 
 ```{r}
-#| label: tabla-omisiones-inserciones
-oi %>%
-  group_by(operacion) %>%
-  mutate(puesto = row_number()) %>%
-  ungroup() %>%
-  transmute(
-    Puesto = puesto, Tipo = str_to_sentence(operacion), Carácter = caracter, Veces = n
-  ) %>%
-  pivot_wider(names_from = Tipo, values_from = c(Carácter, Veces), names_glue = "{Tipo}: {.value}") %>%
-  select(Puesto, starts_with("Omisión"), starts_with("Inserción")) %>%
-  kable(format = "markdown", caption = "Caracteres más omitidos e insertados.", align = "rlrlr")
+#| label: tbl-omisiones
+#| tbl-cap: "Caracteres más omitidos e insertados."
+omitidos <- oi %>% filter(operacion == "omisión")
+insertados <- oi %>% filter(operacion == "inserción")
+k <- max(nrow(omitidos), nrow(insertados))
+rellenar <- function(x) c(x, rep(NA, k - length(x)))
+tibble(
+  Puesto = seq_len(k),
+  `Carácter omitido` = rellenar(omitidos$caracter), Veces = rellenar(omitidos$n),
+  `Carácter insertado` = rellenar(insertados$caracter), `Veces ` = rellenar(insertados$n)
+) %>%
+  kable(format = "markdown", align = "rlrlr", col.names = c("Puesto", "Carácter omitido", "Veces", "Carácter insertado", "Veces"))
 ```
 
 ## Preservación de entidades administrativas
@@ -326,6 +394,8 @@ oi %>%
 #| fig-height: 2.5
 guardar_figura(grafico_preservacion(pres, etiquetas), "fig6_preservacion.jpg", 8, 2.5)
 ```
+
+La @fig-preservacion resume la preservación por categoría:
 
 - **Fechas** (n = `r n_cat("fecha")`): `r pct(tasa_cat("fecha"))`.
 - **Números** (n = `r n_cat("numero")`): `r pct(tasa_cat("numero"))`.
@@ -338,10 +408,11 @@ es sensible a un solo acierto o error: una entidad equivale a `r num(100 / cat_c
 
 ## Estabilidad entre documentos
 
-¿Es el desempeño del motor consistente entre documentos?
+¿Es el desempeño del motor consistente entre documentos? La @tbl-estabilidad y la @fig-dispersion resumen la distribución del error.
 
 ```{r}
-#| label: tabla-estabilidad
+#| label: tbl-estabilidad
+#| tbl-cap: "Distribución del CER y del WER entre documentos (IQR: rango intercuartílico; P90: percentil 90; máx.: valor máximo)."
 disp %>%
   mutate(Motor = etiquetas[motor]) %>%
   select(Motor, metrica, mediana, iqr, p90, maximo) %>%
@@ -349,7 +420,7 @@ disp %>%
   select(Motor, starts_with("CER"), starts_with("WER")) %>%
   rename_with(~ str_replace_all(.x, c("mediana" = "mediana", "iqr" = "IQR", "p90" = "P90", "maximo" = "máx.")), -Motor) %>%
   mutate(across(-Motor, pct)) %>%
-  kable(format = "markdown", caption = "Distribución del CER y del WER entre documentos (IQR: rango intercuartílico; P90: percentil 90; máx.: valor máximo).", align = "lrrrrrrrr")
+  kable(format = "markdown", align = "lrrrrrrrr")
 ```
 
 ```{r}
@@ -396,15 +467,15 @@ if (hay_contraste) {
       "de modo que no es un experimento controlado ni permite atribuir causas."
     ),
     magnitud = paste0(
-      "Con escritura manuscrita el error típico es mucho mayor: el CER mediano pasa de ",
+      "Con escritura manuscrita el error típico es mucho mayor (@tbl-contraste): el CER mediano pasa de ",
       pct(cval("cer_mediana")), " a ", pct(d1("CER", mediana)), " y el WER mediano de ",
       pct(cval("wer_mediana")), " a ", pct(d1("WER", mediana)),
-      ". También cambia la forma en que falla: en los folios impresos predominan las omisiones (",
+      ". También cambia la forma en que falla (@fig-contraste-composicion): en los folios impresos predominan las omisiones (",
       pct(p_ocr("Omisión")), " de las operaciones) y en los manuscritos, las ",
       plural_op[[op_dom]], " (", pct(p_op(op_dom)), ")."
     ),
     entidades = paste0(
-      "La preservación de entidades baja en las cuatro categorías: nombres propios, de ",
+      "La preservación de entidades baja en las cuatro categorías (@fig-contraste-entidades): nombres propios, de ",
       pct(tasa_ocr("nombre_propio")), " a ", pct(tasa_cat("nombre_propio")), "; fechas, de ",
       pct(tasa_ocr("fecha")), " a ", pct(tasa_cat("fecha")), "; códigos administrativos, de ",
       pct(tasa_ocr("codigo_administrativo")), " a ", pct(tasa_cat("codigo_administrativo")),
@@ -433,11 +504,11 @@ if (hay_contraste) {
 `r if (hay_contraste) txt_ctr$intro else "No se configuró un archivo de contraste con el análisis OCR (clave contraste_ocr en config.yml)."`
 
 ```{r}
-#| label: tabla-contraste
+#| label: tbl-contraste
 #| eval: !expr hay_contraste
+#| tbl-cap: "OlmOCR en folios impresos (cifras del reporte OCR) y en documentos manuscritos (este reporte)."
 kable(tabla_ctr, format = "markdown", align = "lrr",
-      col.names = c("Indicador", etiq_corpus[["ocr"]], etiq_corpus[["icr"]]),
-      caption = "OlmOCR en folios impresos (cifras del reporte OCR) y en documentos manuscritos (este reporte).")
+      col.names = c("Indicador", etiq_corpus[["ocr"]], etiq_corpus[["icr"]]))
 ```
 
 `r if (hay_contraste) txt_ctr$magnitud`
@@ -501,29 +572,34 @@ que otro. El siguiente paso es agregar las salidas de otros motores en `config.y
 ## A. CER y WER completos {.unnumbered}
 
 ```{r}
-#| label: tabla-cer-wer
+#| label: tbl-cer-wer
+#| tbl-cap: "CER y WER por motor (n: número de documentos; la asimetría es la de Fisher-Pearson entre documentos)."
 disp %>%
   left_join(asim, by = c("motor", "metrica")) %>%
   select(motor, metrica, documentos, media, mediana, asimetria) %>%
   pivot_wider(names_from = metrica, values_from = c(media, mediana, asimetria), names_glue = "{metrica} {.value}") %>%
   transmute(
-    Motor = etiquetas[motor], Documentos = documentos,
+    Motor = etiquetas[motor], n = documentos,
     `CER medio` = pct(`CER media`), `CER mediano` = pct(`CER mediana`), `CER asimetría` = num(`CER asimetria`, 2),
     `WER medio` = pct(`WER media`), `WER mediano` = pct(`WER mediana`), `WER asimetría` = num(`WER asimetria`, 2)
   ) %>%
-  kable(format = "markdown", caption = "CER y WER por motor (la asimetría es la de Fisher-Pearson entre documentos).", align = "lrrrrrrr")
+  kable(format = "markdown", align = "lrrrrrrr")
 ```
 
 ## B. Errores por operación y tipo {.unnumbered}
 
+La @tbl-tipos desglosa las sustituciones, omisiones e inserciones de la @tbl-ops según el tipo de carácter
+implicado, y expresa cada tipo como porcentaje de los errores y por cada 100 caracteres de la referencia.
+
 ```{r}
-#| label: tabla-tipos
+#| label: tbl-tipos
+#| tbl-cap: "Errores de carácter por operación y tipo. La última columna son errores por cada 100 caracteres de la referencia."
 resumen_tipos_error(errores, n_ref_car) %>%
   transmute(
     Motor = etiquetas[motor], Operación = operacion, Tipo = tipo, n = miles(n),
     `% de errores` = pct(pct_errores), `Por 100 car.` = num(tasa_por_100_car, 2)
   ) %>%
-  kable(format = "markdown", caption = "Errores de carácter por operación y tipo. La última columna son errores por cada 100 caracteres de la referencia.", align = "lllrrr")
+  kable(format = "markdown", align = "lllrrr")
 ```
 
 ## C. Principales sustituciones por motor {.unnumbered}
@@ -533,9 +609,9 @@ Cinco sustituciones más frecuentes dentro de cada motor.
 ```{r}
 #| label: tabs-sustituciones
 #| results: asis
-cat("::: {.panel-tabset}\n\n")
+tabset_abrir()
 for (m in motores) {
-  cat("### ", etiquetas[[m]], "\n\n", sep = "")
+  tabset_titulo(etiquetas[[m]])
   errores %>%
     filter(motor == m, operacion == "sustitución") %>%
     mutate(Referencia = nombre_caracter(ref_char), ICR = nombre_caracter(hip_char)) %>%
@@ -545,7 +621,7 @@ for (m in motores) {
     cat(sep = "\n")
   cat("\n\n")
 }
-cat(":::\n")
+tabset_cerrar()
 ```
 
 ## D. Preservación de entidades por categoría {.unnumbered}
@@ -553,9 +629,9 @@ cat(":::\n")
 ```{r}
 #| label: tabs-entidades
 #| results: asis
-cat("::: {.panel-tabset}\n\n")
+tabset_abrir()
 for (cat_id in names(categorias_entidad)) {
-  cat("### ", categorias_entidad[[cat_id]], "\n\n", sep = "")
+  tabset_titulo(categorias_entidad[[cat_id]])
   pres %>%
     filter(categoria == cat_id) %>%
     transmute(
@@ -566,7 +642,7 @@ for (cat_id in names(categorias_entidad)) {
     cat(sep = "\n")
   cat("\n\n")
 }
-cat(":::\n")
+tabset_cerrar()
 ```
 
 ## E. Integración tabular con tidytext {.unnumbered}
@@ -577,7 +653,8 @@ tildes, la misma definición del WER. Esta capa no modifica CER ni WER; permite 
 vocabulario distinto produce cada motor frente a la referencia.
 
 ```{r}
-#| label: tabla-tokens
+#| label: tbl-tokens
+#| tbl-cap: "Volumen de tokens totales y únicos por motor."
 vol %>%
   transmute(
     Motor = etiquetas[motor],
@@ -586,7 +663,7 @@ vol %>%
     `Únicos referencia` = miles(unicos_referencia), `Únicos ICR` = miles(unicos_ocr),
     `Únicos ICR / referencia` = pct(razon_unicos)
   ) %>%
-  kable(format = "markdown", caption = "Volumen de tokens totales y únicos por motor.", align = "lrrrrrr")
+  kable(format = "markdown", align = "lrrrrrr")
 ```
 
 En `r lab`, `r miles(dif_tilde$anadidas)` palabras distintas de la salida no existen en la referencia y
@@ -595,19 +672,21 @@ En `r lab`, `r miles(dif_tilde$anadidas)` palabras distintas de la salida no exi
 perdida al quitar las tildes: son la misma palabra escrita con otra tilde.
 
 ```{r}
-#| label: tabla-palabras-anadidas
+#| label: tbl-anadidas
+#| tbl-cap: "Palabras más repetidas que el motor escribe y la referencia no tiene."
 pal_dif %>%
   filter(motor == m1, tipo == "Añadidas por el ICR") %>%
   transmute(Palabra = token, Veces = n) %>%
-  kable(format = "markdown", caption = "Palabras más repetidas que el motor escribe y la referencia no tiene.", align = "lr")
+  kable(format = "markdown", align = "lr")
 ```
 
 ```{r}
-#| label: tabla-palabras-perdidas
+#| label: tbl-perdidas
+#| tbl-cap: "Palabras más repetidas de la referencia que el motor nunca escribe."
 pal_dif %>%
   filter(motor == m1, tipo == "Perdidas por el ICR") %>%
   transmute(Palabra = token, Veces = n) %>%
-  kable(format = "markdown", caption = "Palabras más repetidas de la referencia que el motor nunca escribe.", align = "lr")
+  kable(format = "markdown", align = "lr")
 ```
 
 ## F. Reproducibilidad {.unnumbered}
