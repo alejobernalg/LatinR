@@ -17,3 +17,8 @@ motores:
 # FALSE: cada línea del archivo es un documento.
 # TRUE: las líneas que empiezan en minúscula se unen a la anterior.
 unir_continuaciones: false
+
+# Opcional: cifras de OlmOCR sobre los folios impresos (reporte OCR de otro
+# análisis), transcritas de su reporte. Si el archivo existe, el reporte agrega
+# la sección de contraste OCR / ICR; no se recalculan aquí.
+contraste_ocr: Datos/contraste_ocr_olmo.csv

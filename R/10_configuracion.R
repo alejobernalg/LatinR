@@ -43,3 +43,22 @@ cargar_corpus <- function(cfg, dir_base = ".") {
     }) %>%
     bind_rows()
 }
+
+#' Lee las cifras de referencia de un análisis OCR externo (contraste)
+#'
+#' El archivo es un CSV largo con columnas `indicador`, `detalle`, `valor`,
+#' `total` y `fuente`: una fila por cifra tomada del reporte OCR (métricas
+#' por documento, operaciones de edición y entidades preservadas). Estas
+#' cifras no se recalculan en este proyecto; solo se leen para contrastarlas
+#' con el análisis ICR.
+#'
+#' @param ruta Ruta del CSV.
+#' @return Tibble con las columnas del archivo; `valor` y `total` numéricos.
+leer_contraste <- function(ruta) {
+  tabla <- readr::read_csv(ruta, show_col_types = FALSE, col_types = readr::cols(.default = "c"))
+  faltan <- setdiff(c("indicador", "detalle", "valor", "total", "fuente"), names(tabla))
+  if (length(faltan) > 0) {
+    stop("Faltan columnas en el archivo de contraste: ", paste(faltan, collapse = ", "))
+  }
+  tabla %>% mutate(across(c(valor, total), as.numeric))
+}

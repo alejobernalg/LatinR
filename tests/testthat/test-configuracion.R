@@ -29,3 +29,19 @@ test_that("cargar_corpus arma un documento por línea y motor", {
   expect_equal(sort(unique(corpus$motor)), c("a", "b"))
   expect_false(cfg$unir_continuaciones)
 })
+
+test_that("leer_contraste devuelve valores numéricos y exige las columnas", {
+  ruta <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c(
+    "indicador,detalle,valor,total,fuente",
+    "cer_mediana,,0.005,,x",
+    "entidades,fecha,4,5,x"
+  ), ruta)
+
+  res <- leer_contraste(ruta)
+  expect_equal(res$valor, c(0.005, 4))
+  expect_equal(res$total, c(NA, 5))
+
+  writeLines(c("indicador,valor", "a,1"), ruta)
+  expect_error(leer_contraste(ruta), "detalle, total, fuente")
+})

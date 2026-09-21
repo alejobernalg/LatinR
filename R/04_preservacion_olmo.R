@@ -16,11 +16,4 @@ if (sys.nframe() == 0) {
   tabla_olmo <- preservacion_entidades(df_olmo)
 
   print(tabla_olmo, n = Inf)
-
-  p <- graficar_preservacion_entidades(tabla_olmo)
-  dir.create("figuras", showWarnings = FALSE)
-  ggsave(
-    "figuras/preservacion_entidades_olmo.png", p,
-    width = 8, height = 6, dpi = 150, device = ragg::agg_png
-  )
 }

@@ -20,11 +20,4 @@ if (sys.nframe() == 0) {
 
   print(df_olmo, n = Inf)
   print(resumen_olmo, n = Inf)
-
-  p <- graficar_estabilidad(df_olmo)
-  dir.create("figuras", showWarnings = FALSE)
-  ggsave(
-    "figuras/estabilidad_olmo.png", p,
-    width = 8, height = 6, dpi = 150, device = ragg::agg_png
-  )
 }

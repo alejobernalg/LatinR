@@ -27,11 +27,4 @@ if (sys.nframe() == 0) {
 
   cat("\n== Confusiones más frecuentes por tipo ==\n")
   print(confusiones_frecuentes(errores), n = Inf)
-
-  p <- graficar_tipos_error(resumen)
-  dir.create("figuras", showWarnings = FALSE)
-  ggsave(
-    "figuras/tipos_error_olmo.png", p,
-    width = 8, height = 6, dpi = 150, device = ragg::agg_png
-  )
 }

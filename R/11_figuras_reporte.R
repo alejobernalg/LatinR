@@ -135,7 +135,7 @@ grafico_sustituciones <- function(top, etiquetas) {
     scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
     labs(
       x = "Sustituciones (conteo sobre los documentos)",
-      y = "Referencia → OCR", fill = "Tipo de sustitución"
+      y = "Referencia → ICR", fill = "Tipo de sustitución"
     ) +
     tema_reporte() +
     theme(legend.title = element_text(size = 10))
@@ -201,10 +201,10 @@ grafico_dispersion <- function(tabla, etiquetas) {
 
   ggplot(tabla, aes(x = motor, y = valor)) +
     geom_boxplot(outlier.shape = NA, fill = "white", color = azul_reporte, width = 0.3) +
-    geom_jitter(width = 0.12, height = 0, alpha = 0.6, size = 1.6, color = azul_reporte) +
+    geom_point(position = position_jitter(width = 0.12, height = 0, seed = 2026), alpha = 0.6, size = 1.6, color = azul_reporte) +
     ggrepel::geom_text_repel(
       data = peores, aes(label = etiqueta), size = 3.3, color = "grey25",
-      nudge_x = 0.28, segment.color = "grey60", min.segment.length = 0
+      nudge_x = 0.28, segment.color = "grey60", min.segment.length = 0, seed = 2026
     ) +
     facet_wrap(~metrica, scales = "free_y") +
     scale_x_discrete(expand = expansion(add = 1)) +
@@ -221,8 +221,8 @@ grafico_flujo <- function(n_docs, n_motores, nombres_motores) {
     cifra = c(n_docs, n_motores, n_docs * n_motores, 3),
     texto = c(
       "documentos\n(una línea por documento)",
-      paste0("motor", if (n_motores > 1) "es", " OCR\n", paste(nombres_motores, collapse = " · ")),
-      "comparaciones\nreferencia frente a\nsalida OCR",
+      paste0("motor", if (n_motores > 1) "es", " ICR\n", paste(nombres_motores, collapse = " · ")),
+      "comparaciones\nreferencia frente a\nsalida ICR",
       "análisis por motor\ncarácter · entidades\nestabilidad"
     )
   )
@@ -242,12 +242,108 @@ grafico_flujo <- function(n_docs, n_motores, nombres_motores) {
     theme_void()
 }
 
-#' Guarda una figura del reporte como PNG en `figuras/` y la devuelve
+#' Símbolo legible de un carácter para los ejes de la matriz de confusión
+#'
+#' `NA` (omisión en la salida o inserción en la referencia) se muestra como
+#' "∅" y el espacio como "␣".
+simbolo_caracter <- function(x) {
+  case_when(is.na(x) ~ "\u2205", x == " " ~ "\u2423", TRUE ~ x)
+}
+
+#' Matriz de confusión de caracteres de un motor, con omisiones e inserciones
+#'
+#' A diferencia de `matriz_confusion()`, que solo cuenta sustituciones, aquí
+#' cada error es una celda: una sustitución es un par (referencia, salida), una
+#' omisión es (carácter, ∅) y una inserción es (∅, carácter). Para que sea
+#' legible se conservan los `top` caracteres con más errores de cada lado.
+#'
+#' @param errores Tibble producido por `errores_por_tipo()`.
+#' @param motor_filtro Motor a graficar.
+#' @param top Número de caracteres de referencia y de salida que se muestran.
+matriz_confusion_completa <- function(errores, motor_filtro, top = 20) {
+  e <- errores %>%
+    filter(motor == motor_filtro) %>%
+    mutate(ref = simbolo_caracter(ref_char), hip = simbolo_caracter(hip_char)) %>%
+    count(ref, hip, name = "n")
+  mantener <- function(col) {
+    e %>% filter(.data[[col]] != "\u2205") %>%
+      count(.data[[col]], wt = n, sort = TRUE) %>%
+      slice_head(n = top) %>% pull(1)
+  }
+  e %>% filter(ref %in% c(mantener("ref"), "\u2205"), hip %in% c(mantener("hip"), "\u2205"))
+}
+
+#' Figura: matriz de confusión de caracteres (mapa de calor con el conteo)
+grafico_matriz_confusion <- function(mc) {
+  orden_ref <- mc %>% count(ref, wt = n, sort = TRUE) %>% pull(ref)
+  orden_hip <- mc %>% count(hip, wt = n, sort = TRUE) %>% pull(hip)
+  mc %>%
+    mutate(
+      ref = factor(ref, levels = rev(orden_ref)),
+      hip = factor(hip, levels = orden_hip),
+      operacion = case_when(
+        ref == "\u2205" ~ "Inserción", hip == "\u2205" ~ "Omisión", TRUE ~ "Sustitución"
+      ),
+      operacion = factor(operacion, levels = names(paleta_operacion))
+    ) %>%
+    ggplot(aes(x = hip, y = ref, fill = n)) +
+    geom_tile(color = "white", linewidth = 0.6) +
+    geom_text(aes(label = n, color = n > 0.5 * max(n)), size = 3) +
+    scale_color_manual(values = c("TRUE" = "white", "FALSE" = "grey15"), guide = "none") +
+    scale_fill_gradient(low = "#E4ECF3", high = "#1F5B85", name = "Errores", trans = "sqrt") +
+    scale_x_discrete(position = "top") +
+    labs(x = "Carácter en la salida ICR (\u2205: omisión)", y = "Carácter en la referencia (\u2205: inserción)") +
+    tema_reporte() +
+    theme(
+      panel.grid = element_blank(), legend.position = "right",
+      axis.title.x = element_text(margin = margin(b = 6)), axis.ticks = element_blank()
+    )
+}
+
+#' Caracteres más omitidos o insertados de un motor
+#'
+#' @param errores Tibble producido por `errores_por_tipo()`.
+#' @return Tibble con `operacion` ("omisión" o "inserción"), `caracter` (su
+#'   nombre legible) y `n`, los `top` más frecuentes de cada operación.
+top_omisiones_inserciones <- function(errores, motor_filtro, top = 5) {
+  errores %>%
+    filter(motor == motor_filtro, operacion %in% c("omisión", "inserción")) %>%
+    mutate(caracter = nombre_caracter(if_else(operacion == "omisión", ref_char, hip_char))) %>%
+    count(operacion, caracter, name = "n") %>%
+    group_by(operacion) %>%
+    slice_max(n, n = top, with_ties = FALSE) %>%
+    ungroup() %>%
+    arrange(operacion, desc(n))
+}
+
+#' Figura: preservación de entidades en el corpus OCR y en el ICR, por categoría
+#'
+#' @param tabla Tibble con `categoria`, `corpus`, `preservadas` y `total`.
+grafico_contraste_entidades <- function(tabla) {
+  tabla %>%
+    mutate(
+      categoria = factor(categorias_entidad[categoria], levels = unname(categorias_entidad)),
+      tasa = preservadas / total
+    ) %>%
+    ggplot(aes(x = tasa, y = fct_rev(categoria), fill = corpus)) +
+    geom_col(position = position_dodge(width = 0.75), width = 0.68) +
+    geom_text(
+      aes(label = paste0(round(100 * tasa), "%  (", preservadas, "/", total, ")")),
+      position = position_dodge(width = 0.75), hjust = -0.08, size = 3.3, color = "grey20"
+    ) +
+    scale_fill_manual(values = c(setNames(c("#8FB3D1", azul_reporte), levels(factor(tabla$corpus))))) +
+    scale_x_continuous(labels = scales::label_percent(), limits = c(0, 1.32), breaks = seq(0, 1, 0.25)) +
+    labs(x = "Entidades de la referencia presentes en la salida de OlmOCR", y = NULL, fill = NULL) +
+    tema_reporte() +
+    guides(fill = guide_legend(reverse = TRUE))
+}
+
+#' Guarda una figura del reporte como JPG en `Reporte/Figuras_reporte/ICR/` y la devuelve
 #'
 #' Se usa dentro de los bloques del reporte: la figura se dibuja en el
 #' documento y además queda guardada como archivo.
-guardar_figura <- function(p, nombre, ancho = 8, alto = 4.6, dir = "figuras") {
-  dir.create(dir, showWarnings = FALSE)
-  ggsave(file.path(dir, nombre), p, width = ancho, height = alto, dpi = 200, device = ragg::agg_png)
+guardar_figura <- function(p, nombre, ancho = 8, alto = 4.6, dir = "Reporte/Figuras_reporte/ICR") {
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  ggsave(file.path(dir, nombre), p, width = ancho, height = alto, dpi = 200, device = ragg::agg_jpeg, quality = 95)
   p
 }

@@ -12,3 +12,35 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 });
 </script>
+<script>
+/* Al imprimir o exportar a PDF, las pestañas se muestran todas, una tras otra */
+window.addEventListener("beforeprint", function () {
+  document.querySelectorAll(".panel-tabset").forEach(function (ts) {
+    var lista = ts.querySelector(":scope > ul");
+    var enlaces = ts.querySelectorAll(":scope > ul .nav-link");
+    var paneles = ts.querySelectorAll(":scope > .tab-content > .tab-pane");
+    if (lista) lista.style.display = "none";
+    paneles.forEach(function (p, i) {
+      p.style.display = "block";
+      p.style.opacity = "1";
+      if (!p.querySelector(".titulo-impresion") && enlaces[i]) {
+        var h = document.createElement("h4");
+        h.className = "titulo-impresion";
+        h.textContent = enlaces[i].textContent;
+        h.style.cssText = "font-family:sans-serif;font-size:1rem;margin:1rem 0 0.4rem;";
+        p.insertBefore(h, p.firstChild);
+      }
+    });
+  });
+});
+window.addEventListener("afterprint", function () {
+  document.querySelectorAll(".panel-tabset").forEach(function (ts) {
+    var lista = ts.querySelector(":scope > ul");
+    if (lista) lista.style.display = "";
+    ts.querySelectorAll(".titulo-impresion").forEach(function (h) { h.remove(); });
+    ts.querySelectorAll(":scope > .tab-content > .tab-pane").forEach(function (p) {
+      p.style.display = ""; p.style.opacity = "";
+    });
+  });
+});
+</script>
